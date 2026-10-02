@@ -5,43 +5,247 @@ import asyncio
 import requests
 import discord
 
-from discord.ext import commands
 from dotenv import load_dotenv
+from discord.ext import commands
 
 load_dotenv()
 
-# =========================================================
-# SETTINGS
-# =========================================================
-
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
-
-AI_CHANNEL_ID = int(os.getenv("AI_CHANNEL_ID", "0"))
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-MODEL = "openrouter/free"
-
-
-# =========================================================
-# CHECK ENV
-# =========================================================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+AI_CHANNEL_ID = int(os.getenv("AI_CHANNEL_ID", "1555286306182139915"))
 
 if not DISCORD_TOKEN:
     raise RuntimeError("DISCORD_TOKEN is missing")
 
-if not OPENROUTER_API_KEY:
-    raise RuntimeError("OPENROUTER_API_KEY is missing")
-
-if not AI_CHANNEL_ID:
-    raise RuntimeError("AI_CHANNEL_ID is missing")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is missing")
 
 
-# =========================================================
+# =========================
+# GROQ SETTINGS
+# =========================
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+MODEL = "openai/gpt-oss-120b"
+
+
+# =========================
+# AI SYSTEM PROMPT
+# =========================
+
+SYSTEM_PROMPT = r"""
+You are Firstmc AI, the official AI assistant for FirstMC.
+
+You are a general-purpose AI assistant.
+You can help with:
+- Minecraft
+- Paper
+- Spigot
+- Bukkit
+- Fabric
+- Forge
+- Skript
+- Java plugins
+- Python
+- JavaScript
+- HTML
+- CSS
+- YAML
+- JSON
+- Discord bots
+- Linux
+- Termux
+- Git
+- GitHub
+- Railway
+- Hosting
+- Programming
+- General questions
+
+IMPORTANT:
+
+1. Always answer in the same language as the user.
+2. If the user speaks Arabic, answer in Arabic.
+3. If the user speaks English, answer in English.
+4. Keep normal answers clear and reasonably concise.
+5. Do not invent facts, plugins, URLs, versions, commands, APIs, or features.
+6. If information may have changed recently, use web search when available.
+7. If the user asks you to find an EXISTING plugin, do NOT create one.
+8. If the user asks you to CREATE a plugin, create the plugin.
+9. If the user asks to fix code, return the complete corrected code when practical.
+10. Preserve the user's requested filenames.
+11. Never expose API keys, tokens, passwords, or secrets.
+
+FIRSTMC CONTEXT:
+
+Minecraft server:
+FirstMC
+
+Main server focus:
+BoxPvP + SMP + FFA
+
+Common server software:
+Paper
+
+Current Minecraft version:
+1.21.11
+
+Java:
+21
+
+Common plugins:
+Skript
+WorldEdit
+FAWE
+WorldGuard
+LuckPerms
+TAB
+Multiverse-Core
+Essentials
+Geyser
+DeluxeMenus
+Citizens
+ZNPCsPlus
+DecentHolograms
+AdvancedBanZ
+CombatLog
+PlayerKits
+
+When giving Minecraft code, prefer compatibility with Paper 1.21.x and Java 21 unless the user specifies otherwise.
+
+SKRIPT FILES:
+
+If the user asks for a Skript file, return it using this exact wrapper:
+
+<SKRIPT filename="example.sk">
+PASTE COMPLETE SKRIPT HERE
+</SKRIPT>
+
+Example:
+
+<SKRIPT filename="spawn.sk">
+command /spawn:
+    trigger:
+        teleport player to spawn
+</SKRIPT>
+
+Do not put Markdown code fences around the SKRIPT wrapper.
+
+JAVA PLUGINS:
+
+If the user asks for a Java plugin, provide complete project files when needed.
+
+Use this style:
+
+<FILE path="src/main/java/com/firstmc/example/Main.java">
+COMPLETE FILE
+</FILE>
+
+<FILE path="src/main/resources/plugin.yml">
+COMPLETE FILE
+</FILE>
+
+<FILE path="pom.xml">
+COMPLETE FILE
+</FILE>
+
+Do not invent missing dependencies.
+
+OTHER FILES:
+
+You may use:
+
+<FILE path="filename.py">
+CODE
+</FILE>
+
+<FILE path="filename.js">
+CODE
+</FILE>
+
+<FILE path="filename.yml">
+CODE
+</FILE>
+
+<FILE path="filename.json">
+CODE
+</FILE>
+
+<FILE path="filename.html">
+CODE
+</FILE>
+
+<FILE path="filename.css">
+CODE
+</FILE>
+
+When multiple files are requested, provide all required files.
+
+PLUGIN SEARCH:
+
+If the user asks:
+"find a plugin"
+"give me a plugin"
+"what plugin does this"
+"دورلي بلوقن"
+"ابحث عن بلوقن"
+
+Treat it as a request for an existing plugin.
+
+Do not silently create a replacement plugin.
+
+If web search results are available:
+- give the real plugin name
+- explain what it does
+- give compatibility information
+- provide the official website/download page when known
+- do not invent URLs
+
+PLUGIN CREATION:
+
+If the user explicitly says:
+"make a plugin"
+"create a plugin"
+"برمجلي بلوقن"
+"سوي لي بلوقن"
+
+Then create the plugin.
+
+CODE FIXING:
+
+If the user gives broken code:
+- identify the problem briefly
+- provide the corrected complete code
+- do not return only a tiny fragment if the complete file can be provided
+
+MINECRAFT COMMANDS:
+
+Commands should be shown in code blocks.
+
+Do not use unnecessary decoration.
+
+DISCORD:
+
+The bot is intended to operate inside a dedicated Discord AI channel.
+
+Do not require slash commands for normal AI conversations.
+
+The user can simply write natural language.
+
+SAFETY:
+
+Do not help with harmful, illegal, dangerous, or abusive activity.
+
+Do not claim that you performed an action if you only generated instructions.
+
+Always be honest about what you can and cannot do.
+"""
+
+
+# =========================
 # DISCORD
-# =========================================================
+# =========================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -52,212 +256,103 @@ bot = commands.Bot(
 )
 
 
-# =========================================================
-# SYSTEM PROMPT
-# =========================================================
+# =========================
+# FILE EXTRACTION
+# =========================
 
-SYSTEM_PROMPT = """
-You are Firstmc AI.
+def extract_skript(text):
+    pattern = r'<SKRIPT\s+filename="([^"]+)"\s*>(.*?)</SKRIPT>'
+    matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
 
-You are a general purpose AI assistant inside Discord.
+    if not matches:
+        return None
 
-RULES:
+    filename, content = matches[0]
 
-- Reply in the same language as the user.
-- Arabic user = Arabic response.
-- English user = English response.
-- Do not require commands.
-- Understand normal natural language.
-- Be direct and useful.
-- Do not use Discord embeds.
-- Normal responses should be normal Discord text.
+    filename = os.path.basename(filename)
 
-MINECRAFT:
+    if not filename.endswith(".sk"):
+        filename += ".sk"
 
-You can help with:
-
-Paper
-Spigot
-Bukkit
-Purpur
-Fabric
-Forge
-NeoForge
-Skript
-Java plugins
-WorldGuard
-WorldEdit
-FAWE
-LuckPerms
-TAB
-Essentials
-Multiverse
-DeluxeMenus
-Geyser
-Citizens
-ZNPCsPlus
-PvP
-BoxPvP
-SMP
-FFA
-server configuration
-commands
-permissions
-optimization
-
-EXISTING PLUGIN:
-
-If the user asks for an existing plugin:
-- Do not invent one.
-- Use web search results when available.
-- Give the real plugin name.
-- Give compatibility information when available.
-- Give the official website/download page when available.
-
-PLUGIN CREATION:
-
-If the user asks to CREATE a plugin:
-- Generate the complete plugin.
-- Include all required Java files.
-- Include plugin.yml.
-- Include pom.xml when appropriate.
-- Make it compatible with the requested Minecraft/Paper version.
-
-SKRIPT:
-
-When creating a Skript file, use:
-
-<SKRIPT filename="example.sk">
-COMPLETE SKRIPT
-</SKRIPT>
-
-The bot converts this into a downloadable .sk file.
-
-CODE FIXING:
-
-If the user sends broken code:
-- Find the problem.
-- Fix it.
-- Return the complete corrected file.
-- Do not return only a small fragment when a complete file is needed.
-
-GENERAL:
-
-You are not limited to Minecraft.
-You can answer general questions too.
-
-Do not claim you searched the internet unless search results were actually provided.
-"""
+    return filename, content.strip()
 
 
-# =========================================================
-# SEARCH
-# =========================================================
+def extract_files(text):
+    pattern = r'<FILE\s+path="([^"]+)"\s*>(.*?)</FILE>'
+    matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
 
-SEARCH_WORDS = [
-    "ابحث",
-    "دور",
-    "دورلي",
-    "وين",
-    "موقع",
-    "رابط",
-    "تحميل",
-    "بلوقن",
-    "بلجن",
-    "استضافة",
-    "هوست",
-    "إصدار",
-    "نسخة",
-    "متوافق",
-    "متوافقة",
-    "آخر",
-    "احدث",
-    "أحدث",
-    "جديد",
-    "اليوم",
-    "الآن",
-    "حاليا",
-    "حالياً",
-    "plugin",
-    "plugins",
-    "download",
-    "website",
-    "hosting",
-    "host",
-    "latest",
-    "current",
-    "new",
-    "compatible",
-    "version",
-]
+    files = []
 
+    for path, content in matches:
+        path = path.strip().replace("\\", "/")
 
-def should_search(text):
+        # Prevent dangerous filesystem paths
+        path = path.replace("../", "")
+        path = path.lstrip("/")
 
-    text = text.lower()
+        if not path:
+            continue
 
-    for word in SEARCH_WORDS:
-        if word.lower() in text:
-            return True
-
-    return False
-
-
-def web_search(query):
-
-    if not BRAVE_API_KEY:
-        print("WEB SEARCH DISABLED: BRAVE_API_KEY missing")
-        return []
-
-    try:
-
-        response = requests.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            headers={
-                "Accept": "application/json",
-                "X-Subscription-Token": BRAVE_API_KEY
-            },
-            params={
-                "q": query,
-                "count": 6
-            },
-            timeout=10
+        files.append(
+            (
+                path,
+                content.strip()
+            )
         )
 
-        print("BRAVE STATUS:", response.status_code)
-
-        if response.status_code != 200:
-            print("BRAVE RESPONSE:", response.text[:2000])
-            return []
-
-        data = response.json()
-
-        results = []
-
-        for item in data.get("web", {}).get("results", [])[:6]:
-
-            results.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "description": item.get("description", "")
-            })
-
-        print("SEARCH RESULTS:", len(results))
-
-        return results
-
-    except Exception as e:
-
-        print("BRAVE ERROR:", repr(e))
-
-        return []
+    return files
 
 
-# =========================================================
-# OPENROUTER
-# =========================================================
+# =========================
+# GROQ API
+# =========================
 
-def ask_ai_sync(user_message, search_results=None):
+def ask_groq(messages):
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 12000
+    }
+
+    response = requests.post(
+        GROQ_URL,
+        headers=headers,
+        json=payload,
+        timeout=120
+    )
+
+    if response.status_code != 200:
+        try:
+            error_data = response.json()
+        except Exception:
+            error_data = response.text
+
+        raise RuntimeError(
+            f"Groq API error {response.status_code}: {error_data}"
+        )
+
+    data = response.json()
+
+    choices = data.get("choices", [])
+
+    if not choices:
+        raise RuntimeError("Groq returned no choices.")
+
+    content = choices[0].get("message", {}).get("content")
+
+    if not content:
+        raise RuntimeError("Groq returned an empty response.")
+
+    return content
+
+
+async def ask_ai(user_message, history=None):
 
     messages = [
         {
@@ -266,291 +361,97 @@ def ask_ai_sync(user_message, search_results=None):
         }
     ]
 
+    if history:
+        messages.extend(history[-10:])
 
-    # Add search results
-    if search_results:
-
-        search_text = ""
-
-        for result in search_results:
-
-            search_text += (
-                f"TITLE: {result['title']}\n"
-                f"URL: {result['url']}\n"
-                f"DESCRIPTION: {result['description']}\n\n"
-            )
-
-        messages.append({
-            "role": "system",
-            "content":
-                "These are current web search results. "
-                "Use them when relevant.\n\n"
-                + search_text
-        })
-
-
-    messages.append({
-        "role": "user",
-        "content": user_message
-    })
-
-
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 4000
-    }
-
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://firstmc.ai",
-        "X-Title": "Firstmc AI"
-    }
-
-
-    print("=" * 60)
-    print("OPENROUTER REQUEST")
-    print("MODEL:", MODEL)
-    print("=" * 60)
-
-
-    try:
-
-        response = requests.post(
-            OPENROUTER_URL,
-            headers=headers,
-            json=payload,
-            timeout=90
-        )
-
-
-        print("OPENROUTER STATUS:", response.status_code)
-
-        print(
-            "OPENROUTER RAW RESPONSE:",
-            response.text[:5000]
-        )
-
-
-        # HTTP ERROR
-        if response.status_code != 200:
-
-            raise RuntimeError(
-                f"OpenRouter HTTP {response.status_code}: "
-                f"{response.text[:1500]}"
-            )
-
-
-        try:
-
-            data = response.json()
-
-        except Exception:
-
-            raise RuntimeError(
-                "OpenRouter returned invalid JSON:\n"
-                + response.text[:1500]
-            )
-
-
-        # ERROR OBJECT
-        if "error" in data:
-
-            error = data["error"]
-
-            raise RuntimeError(
-                "OpenRouter API error: "
-                + str(error)
-            )
-
-
-        # CHECK CHOICES
-        choices = data.get("choices")
-
-        if not choices:
-
-            raise RuntimeError(
-                "OpenRouter returned no choices:\n"
-                + str(data)[:2000]
-            )
-
-
-        message = choices[0].get("message", {})
-
-        content = message.get("content")
-
-
-        if content is None:
-
-            raise RuntimeError(
-                "OpenRouter returned NULL content:\n"
-                + str(data)[:2000]
-            )
-
-
-        content = str(content).strip()
-
-
-        if not content:
-
-            raise RuntimeError(
-                "OpenRouter returned EMPTY content:\n"
-                + str(data)[:2000]
-            )
-
-
-        print("OPENROUTER SUCCESS")
-
-        return content
-
-
-    except requests.exceptions.Timeout:
-
-        raise RuntimeError(
-            "OpenRouter request timed out after 90 seconds."
-        )
-
-
-    except requests.exceptions.ConnectionError as e:
-
-        raise RuntimeError(
-            "Could not connect to OpenRouter: "
-            + str(e)
-        )
-
-
-async def ask_ai(user_message, search_results=None):
+    messages.append(
+        {
+            "role": "user",
+            "content": user_message
+        }
+    )
 
     return await asyncio.to_thread(
-        ask_ai_sync,
-        user_message,
-        search_results
+        ask_groq,
+        messages
     )
 
 
-# =========================================================
-# SKRIPT
-# =========================================================
+# =========================
+# DISCORD MESSAGE CHUNKING
+# =========================
 
-def extract_skript(text):
+async def send_chunks(channel, text):
+    if not text:
+        return
 
-    pattern = (
-        r'<SKRIPT\s+filename="([^"]+)"\s*>'
-        r'(.*?)'
-        r'</SKRIPT>'
-    )
-
-    matches = re.findall(
-        pattern,
-        text,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if not matches:
-        return None
-
-    filename, code = matches[0]
-
-    filename = filename.strip()
-
-    if not filename.endswith(".sk"):
-        filename += ".sk"
-
-    return filename, code.strip()
-
-
-# =========================================================
-# LONG MESSAGE
-# =========================================================
-
-async def send_long_message(channel, text):
-
+    # Discord message limit
     chunks = []
 
-    while text:
+    while len(text) > 1900:
+        split_at = text.rfind("\n", 0, 1900)
 
-        chunks.append(text[:1900])
+        if split_at <= 0:
+            split_at = 1900
 
-        text = text[1900:]
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip()
 
+    if text:
+        chunks.append(text)
 
     for chunk in chunks:
-
         await channel.send(chunk)
 
 
-# =========================================================
+# =========================
+# SEND GENERATED FILE
+# =========================
+
+async def send_file_content(
+    channel,
+    filename,
+    content,
+    description=None
+):
+
+    data = content.encode("utf-8")
+
+    file = discord.File(
+        io.BytesIO(data),
+        filename=filename
+    )
+
+    if description:
+        await channel.send(
+            content=description,
+            file=file
+        )
+    else:
+        await channel.send(
+            file=file
+        )
+
+
+# =========================
 # READY
-# =========================================================
+# =========================
 
 @bot.event
 async def on_ready():
 
-    print("=" * 60)
-
-    print("FIRSTMC AI V5 ONLINE")
-
-    print("Bot:", bot.user)
-
-    print("AI Channel:", AI_CHANNEL_ID)
-
-    print("Provider: OpenRouter")
-
-    print("Model:", MODEL)
-
-    print(
-        "Web Search:",
-        "ON" if BRAVE_API_KEY else "OFF"
-    )
-
-    channel = bot.get_channel(AI_CHANNEL_ID)
-
-    if channel:
-
-        print(
-            "AI CHANNEL FOUND:",
-            channel.name
-        )
-
-        permissions = channel.permissions_for(
-            channel.guild.me
-        )
-
-        print(
-            "SEND:",
-            permissions.send_messages
-        )
-
-        print(
-            "VIEW:",
-            permissions.view_channel
-        )
-
-        print(
-            "HISTORY:",
-            permissions.read_message_history
-        )
-
-        print(
-            "ATTACH:",
-            permissions.attach_files
-        )
-
-    else:
-
-        print(
-            "WARNING: AI CHANNEL NOT FOUND"
-        )
-
-    print("=" * 60)
+    print("=" * 50)
+    print(f"Logged in as: {bot.user}")
+    print(f"AI Channel: {AI_CHANNEL_ID}")
+    print(f"Groq Model: {MODEL}")
+    print("Web search: Groq built-in tools available")
+    print("Firstmc AI V4 online")
+    print("=" * 50)
 
 
-# =========================================================
-# MESSAGE
-# =========================================================
+# =========================
+# MESSAGE HANDLER
+# =========================
 
 @bot.event
 async def on_message(message):
@@ -558,157 +459,113 @@ async def on_message(message):
     if message.author.bot:
         return
 
-
     if message.channel.id != AI_CHANNEL_ID:
         return
 
+    user_text = message.content.strip()
 
-    text = message.content.strip()
-
-    if not text:
+    if not user_text:
         return
 
+    async with message.channel.typing():
 
-    print("=" * 60)
+        try:
 
-    print(
-        "USER:",
-        message.author
-    )
-
-    print(
-        "MESSAGE:",
-        text
-    )
-
-    print("=" * 60)
-
-
-    try:
-
-        async with message.channel.typing():
-
-            # SEARCH
-            search_results = []
-
-            if should_search(text):
-
-                print("SEARCH REQUEST")
-
-                search_results = await asyncio.to_thread(
-                    web_search,
-                    text
-                )
-
-
-            # AI
-            answer = await ask_ai(
-                text,
-                search_results
+            response = await ask_ai(
+                user_text
             )
 
-
+            # =========================
             # SKRIPT
-            skript = extract_skript(answer)
+            # =========================
 
+            skript = extract_skript(response)
 
             if skript:
 
-                filename, code = skript
+                filename, content = skript
 
-
-                clean_answer = re.sub(
-                    r'<SKRIPT\s+filename="[^"]+"\s*>'
-                    r'.*?'
-                    r'</SKRIPT>',
-                    "",
-                    answer,
-                    flags=re.IGNORECASE | re.DOTALL
+                clean_response = re.sub(
+                    r'<SKRIPT\s+filename="[^"]+"\s*>.*?</SKRIPT>',
+                    '',
+                    response,
+                    flags=re.DOTALL | re.IGNORECASE
                 ).strip()
 
-
-                if clean_answer:
-
-                    await send_long_message(
+                if clean_response:
+                    await send_chunks(
                         message.channel,
-                        clean_answer
+                        clean_response
                     )
 
-
-                file = discord.File(
-                    io.BytesIO(
-                        code.encode("utf-8")
-                    ),
-                    filename=filename
-                )
-
-
-                await message.channel.send(
-                    file=file
-                )
-
-
-                print(
-                    "FILE SENT:",
-                    filename
-                )
-
-
-            else:
-
-                await send_long_message(
+                await send_file_content(
                     message.channel,
-                    answer
+                    filename,
+                    content,
+                    f"📄 `{filename}`"
                 )
 
+                return
 
-    except Exception as e:
+            # =========================
+            # OTHER FILES
+            # =========================
 
-        print("=" * 60)
+            files = extract_files(response)
 
-        print("FIRSTMC AI ERROR")
+            if files:
 
-        print(
-            "TYPE:",
-            type(e).__name__
-        )
+                clean_response = re.sub(
+                    r'<FILE\s+path="[^"]+"\s*>.*?</FILE>',
+                    '',
+                    response,
+                    flags=re.DOTALL | re.IGNORECASE
+                ).strip()
 
-        print(
-            "ERROR:",
-            str(e)
-        )
+                if clean_response:
+                    await send_chunks(
+                        message.channel,
+                        clean_response
+                    )
 
-        print(
-            "REPR:",
-            repr(e)
-        )
+                for path, content in files:
 
-        print("=" * 60)
+                    filename = os.path.basename(path)
 
+                    await send_file_content(
+                        message.channel,
+                        filename,
+                        content,
+                        f"📄 `{path}`"
+                    )
 
-        # Send the REAL error temporarily
-        try:
+                return
 
-            await message.channel.send(
-                "❌ **AI Error**\n"
-                f"```text\n"
-                f"{type(e).__name__}: "
-                f"{str(e)[:1500]}"
-                f"\n```"
+            # =========================
+            # NORMAL RESPONSE
+            # =========================
+
+            await send_chunks(
+                message.channel,
+                response
             )
 
-        except Exception as discord_error:
+        except Exception as e:
 
             print(
-                "DISCORD SEND ERROR:",
-                repr(discord_error)
+                f"[ERROR] {type(e).__name__}: {e}"
             )
 
+            await message.channel.send(
+                "❌ صار خطأ أثناء معالجة طلبك. "
+                "شوف Railway Logs لمعرفة الخطأ."
+            )
 
-# =========================================================
+    await bot.process_commands(message)
+
+
+# =========================
 # RUN
-# =========================================================
-
-print("Starting Firstmc AI V5...")
+# =========================
 
 bot.run(DISCORD_TOKEN)
